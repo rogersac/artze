@@ -50,6 +50,10 @@
       font-weight: 600;
     }
 
+    .required-marker {
+      color: #ff8e8e;
+    }
+
     input:not([type="checkbox"]), select, button {
       width: 100%;
       box-sizing: border-box;
@@ -59,6 +63,11 @@
       padding: 12px;
       background: #111;
       color: #fff;
+    }
+
+    input[aria-invalid="true"] {
+      border-color: #ff8e8e;
+      box-shadow: 0 0 0 1px rgba(255, 142, 142, 0.45);
     }
 
     button {
@@ -89,6 +98,17 @@
       clip: rect(0, 0, 0, 0);
       white-space: nowrap;
       border: 0;
+    }
+
+    .field-error {
+      min-height: 20px;
+      margin-top: 6px;
+      color: #ffb3b3;
+      font-size: 0.9rem;
+    }
+
+    .field-error:empty {
+      display: none;
     }
 
     .toggle-field {
@@ -201,8 +221,15 @@
     </p>
 
     <section class="card">
-      <label for="query">Search term</label>
-      <input id="query" value="Monet" placeholder="Examples: Monet, landscape, flowers, Van Gogh" />
+      <label for="query">Search term <span class="required-marker" aria-hidden="true">*</span></label>
+      <input
+        id="query"
+        value="Monet"
+        placeholder="Examples: Monet, landscape, flowers, Van Gogh"
+        aria-describedby="queryError"
+        required
+      />
+      <div class="field-error" id="queryError" aria-live="polite"></div>
 
       <label for="duration">Seconds per painting</label>
       <input id="duration" type="number" min="5" max="3600" value="60" />
@@ -254,6 +281,8 @@
     const viewer = document.getElementById("viewer");
     const artImage = document.getElementById("artImage");
     const caption = document.getElementById("caption");
+    const queryInput = document.getElementById("query");
+    const queryError = document.getElementById("queryError");
     const status = document.getElementById("status");
     const displayButton = document.getElementById("displayButton");
     const captionAlwaysVisible = document.getElementById("captionAlwaysVisible");
@@ -271,10 +300,13 @@
     let displaySessionId = 0;
 
     displayButton.addEventListener("click", startDisplay);
+    queryInput.addEventListener("input", syncSearchTermState);
+    queryInput.addEventListener("blur", syncSearchTermState);
     captionAlwaysVisible.addEventListener("change", applyCaptionDisplaySetting);
     nextButton.addEventListener("click", showNextArtwork);
     stopButton.addEventListener("click", stopDisplay);
     viewer.addEventListener("click", showControlsTemporarily);
+    syncSearchTermState();
 
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") stopDisplay();
@@ -282,7 +314,7 @@
     });
 
     async function startDisplay() {
-      const query = document.getElementById("query").value.trim();
+      const query = queryInput.value.trim();
       const departmentId = document.getElementById("department").value;
       const limit = Number(document.getElementById("limit").value || 30);
       const durationSeconds = Number(document.getElementById("duration").value || 60);
@@ -290,6 +322,7 @@
 
       if (!query) {
         status.textContent = "Please enter a search term.";
+        syncSearchTermState();
         return;
       }
 
@@ -422,6 +455,14 @@
 
     function applyCaptionDisplaySetting() {
       viewer.classList.toggle("caption-always-visible", captionAlwaysVisible.checked);
+    }
+
+    function syncSearchTermState() {
+      const hasQuery = Boolean(queryInput.value.trim());
+
+      displayButton.disabled = !hasQuery;
+      queryInput.setAttribute("aria-invalid", hasQuery ? "false" : "true");
+      queryError.textContent = hasQuery ? "" : "Search term is required.";
     }
 
     async function loadArtworkDetail(artworkId) {
