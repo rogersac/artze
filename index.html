@@ -50,7 +50,7 @@
       font-weight: 600;
     }
 
-    input, select, button {
+    input:not([type="checkbox"]), select, button {
       width: 100%;
       box-sizing: border-box;
       font: inherit;
@@ -85,6 +85,25 @@
       min-height: 24px;
     }
 
+    .toggle-field {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .toggle-field label {
+      margin: 0;
+    }
+
+    .toggle-field input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: #f5f5f5;
+      flex: 0 0 auto;
+    }
+
     .viewer {
       display: none;
       position: fixed;
@@ -116,6 +135,14 @@
       color: #fff;
       font-size: 0.95rem;
       text-shadow: 0 1px 2px #000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 200ms ease;
+    }
+
+    .viewer.show-controls .caption,
+    .viewer.caption-always-visible .caption {
+      opacity: 1;
     }
 
     .controls {
@@ -194,6 +221,11 @@
         <option value="square">Square</option>
       </select>
 
+      <div class="toggle-field">
+        <input id="captionAlwaysVisible" type="checkbox" checked />
+        <label for="captionAlwaysVisible">Always show caption</label>
+      </div>
+
       <button id="displayButton">Display</button>
       <div class="status" id="status"></div>
     </section>
@@ -218,6 +250,7 @@
     const caption = document.getElementById("caption");
     const status = document.getElementById("status");
     const displayButton = document.getElementById("displayButton");
+    const captionAlwaysVisible = document.getElementById("captionAlwaysVisible");
     const nextButton = document.getElementById("nextButton");
     const stopButton = document.getElementById("stopButton");
 
@@ -228,6 +261,7 @@
     let durationMs = 60000;
 
     displayButton.addEventListener("click", startDisplay);
+    captionAlwaysVisible.addEventListener("change", applyCaptionDisplaySetting);
     nextButton.addEventListener("click", showNextArtwork);
     stopButton.addEventListener("click", stopDisplay);
     viewer.addEventListener("click", showControlsTemporarily);
@@ -264,6 +298,7 @@
         currentIndex = 0;
         setup.style.display = "none";
         viewer.classList.add("active");
+        applyCaptionDisplaySetting();
 
         await requestFullscreenIfAvailable(viewer);
         showArtwork(currentIndex);
@@ -364,7 +399,7 @@
     async function stopDisplay() {
       clearTimeout(timerId);
       clearTimeout(controlsTimerId);
-      viewer.classList.remove("active", "show-controls");
+      viewer.classList.remove("active", "show-controls", "caption-always-visible");
       setup.style.display = "block";
       artImage.removeAttribute("src");
 
@@ -383,6 +418,10 @@
       controlsTimerId = setTimeout(() => {
         viewer.classList.remove("show-controls");
       }, 3000);
+    }
+
+    function applyCaptionDisplaySetting() {
+      viewer.classList.toggle("caption-always-visible", captionAlwaysVisible.checked);
     }
 
     async function requestFullscreenIfAvailable(element) {
