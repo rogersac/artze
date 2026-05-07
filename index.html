@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Met Art Fullscreen Display</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #f5f5f5;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #111;
+    }
+
+    .setup {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 32px 20px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: #ccc;
+      line-height: 1.5;
+    }
+
+    .card {
+      background: #1d1d1d;
+      border: 1px solid #333;
+      border-radius: 16px;
+      padding: 20px;
+      margin-top: 24px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+    }
+
+    label {
+      display: block;
+      margin-top: 16px;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    input, select, button {
+      width: 100%;
+      box-sizing: border-box;
+      font: inherit;
+      border-radius: 10px;
+      border: 1px solid #444;
+      padding: 12px;
+      background: #111;
+      color: #fff;
+    }
+
+    button {
+      margin-top: 22px;
+      cursor: pointer;
+      background: #f5f5f5;
+      color: #111;
+      border: none;
+      font-weight: 700;
+    }
+
+    button:hover {
+      background: #ddd;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 16px;
+      color: #aaa;
+      min-height: 24px;
+    }
+
+    .viewer {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #000;
+      overflow: hidden;
+    }
+
+    .viewer.active {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .viewer img {
+      width: 100vw;
+      height: 100vh;
+      object-fit: contain;
+      background: #000;
+    }
+
+    .caption {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 14px 18px;
+      background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+      color: #fff;
+      font-size: 0.95rem;
+      text-shadow: 0 1px 2px #000;
+    }
+
+    .controls {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .controls button {
+      width: auto;
+      margin: 0;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.85);
+    }
+  </style>
+</head>
+<body>
+  <main class="setup" id="setup">
+    <h1>Met Art Fullscreen Display</h1>
+    <p>
+      Search the Metropolitan Museum of Art collection and display public domain paintings fullscreen.
+      This page runs entirely in your browser and can be hosted for free on GitHub Pages.
+    </p>
+
+    <section class="card">
+      <label for="query">Search term</label>
+      <input id="query" value="Monet" placeholder="Examples: Monet, landscape, flowers, Van Gogh" />
+
+      <label for="duration">Seconds per painting</label>
+      <input id="duration" type="number" min="5" max="3600" value="60" />
+
+      <label for="limit">Maximum paintings to load</label>
+      <input id="limit" type="number" min="5" max="100" value="30" />
+
+      <label for="department">Department</label>
+      <select id="department">
+        <option value="">Any department</option>
+        <option value="11">European Paintings</option>
+        <option value="21">Modern and Contemporary Art</option>
+        <option value="2">American Paintings and Sculpture</option>
+        <option value="6">Asian Art</option>
+      </select>
+
+      <label for="orientation">Image orientation</label>
+      <select id="orientation">
+        <option value="any">Any orientation</option>
+        <option value="horizontal">Horizontal / landscape</option>
+        <option value="vertical">Vertical / portrait</option>
+        <option value="square">Square</option>
+      </select>
+
+      <button id="displayButton">Display</button>
+      <div class="status" id="status"></div>
+    </section>
+  </main>
+
+  <section class="viewer" id="viewer">
+    <img id="artImage" alt="Artwork from the Metropolitan Museum of Art" />
+    <div class="caption" id="caption"></div>
+    <div class="controls">
+      <button id="nextButton">Next</button>
+      <button id="stopButton">Stop</button>
+    </div>
+  </section>
+
+  <script>
+    const MET_API_BASE = "https://collectionapi.metmuseum.org/public/collection/v1";
+
+    const setup = document.getElementById("setup");
+    const viewer = document.getElementById("viewer");
+    const artImage = document.getElementById("artImage");
+    const caption = document.getElementById("caption");
+    const status = document.getElementById("status");
+    const displayButton = document.getElementById("displayButton");
+    const nextButton = document.getElementById("nextButton");
+    const stopButton = document.getElementById("stopButton");
+
+    let artworks = [];
+    let currentIndex = 0;
+    let timerId = null;
+    let durationMs = 60000;
+
+    displayButton.addEventListener("click", startDisplay);
+    nextButton.addEventListener("click", showNextArtwork);
+    stopButton.addEventListener("click", stopDisplay);
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") stopDisplay();
+      if (event.key === "ArrowRight") showNextArtwork();
+    });
+
+    async function startDisplay() {
+      const query = document.getElementById("query").value.trim();
+      const departmentId = document.getElementById("department").value;
+      const limit = Number(document.getElementById("limit").value || 30);
+      const durationSeconds = Number(document.getElementById("duration").value || 60);
+      const selectedOrientation = document.getElementById("orientation").value;
+
+      if (!query) {
+        status.textContent = "Please enter a search term.";
+        return;
+      }
+
+      durationMs = Math.max(5, durationSeconds) * 1000;
+      displayButton.disabled = true;
+      status.textContent = "Searching the Met collection...";
+
+      try {
+        artworks = await loadArtworks(query, departmentId, limit, selectedOrientation);
+
+        if (artworks.length === 0) {
+          status.textContent = "No paintings with usable images were found. Try another search.";
+          return;
+        }
+
+        currentIndex = 0;
+        setup.style.display = "none";
+        viewer.classList.add("active");
+
+        await requestFullscreenIfAvailable(viewer);
+        showArtwork(currentIndex);
+      } catch (error) {
+        console.error(error);
+        status.textContent = "Something went wrong while loading artwork. Try another search.";
+      } finally {
+        displayButton.disabled = false;
+      }
+    }
+
+    async function loadArtworks(query, departmentId, limit, selectedOrientation) {
+      const params = new URLSearchParams({
+        q: query,
+        hasImages: "true",
+        isHighlight: "false"
+      });
+
+      if (departmentId) {
+        params.set("departmentId", departmentId);
+      }
+
+      const searchUrl = `${MET_API_BASE}/search?${params.toString()}`;
+      const searchResponse = await fetch(searchUrl);
+      const searchData = await searchResponse.json();
+      const ids = (searchData.objectIDs || []).slice(0, Math.max(limit * 3, limit));
+
+      status.textContent = `Found ${ids.length} candidates. Loading images...`;
+
+      const results = [];
+
+      for (const id of ids) {
+        if (results.length >= limit) break;
+
+        try {
+          const response = await fetch(`${MET_API_BASE}/objects/${id}`);
+          const object = await response.json();
+
+          const isPainting = (object.classification || "").toLowerCase().includes("paintings")
+            || (object.objectName || "").toLowerCase().includes("painting");
+
+          if (
+            object.isPublicDomain &&
+            object.primaryImage &&
+            isPainting
+          ) {
+            const imageOrientation = await getImageOrientation(object.primaryImage);
+
+            if (selectedOrientation !== "any" && imageOrientation !== selectedOrientation) {
+              continue;
+            }
+
+            results.push({
+              title: object.title || "Untitled",
+              artist: object.artistDisplayName || "Unknown artist",
+              date: object.objectDate || "",
+              image: object.primaryImage,
+              metUrl: object.objectURL || "",
+              orientation: imageOrientation
+            });
+          }
+        } catch (error) {
+          console.warn(`Could not load object ${id}`, error);
+        }
+      }
+
+      return shuffle(results);
+    }
+
+    function showArtwork(index) {
+      const artwork = artworks[index];
+      if (!artwork) return;
+
+      artImage.src = artwork.image;
+      artImage.alt = `${artwork.title} by ${artwork.artist}`;
+      caption.innerHTML = `
+        <strong>${escapeHtml(artwork.title)}</strong>
+        ${artwork.artist ? ` — ${escapeHtml(artwork.artist)}` : ""}
+        ${artwork.date ? ` (${escapeHtml(artwork.date)})` : ""}
+        <br />Image and metadata from The Metropolitan Museum of Art Open Access collection.
+      `;
+
+      resetTimer();
+    }
+
+    function showNextArtwork() {
+      if (artworks.length === 0) return;
+      currentIndex = (currentIndex + 1) % artworks.length;
+      showArtwork(currentIndex);
+    }
+
+    function resetTimer() {
+      clearTimeout(timerId);
+      timerId = setTimeout(showNextArtwork, durationMs);
+    }
+
+    async function stopDisplay() {
+      clearTimeout(timerId);
+      viewer.classList.remove("active");
+      setup.style.display = "block";
+      artImage.removeAttribute("src");
+
+      if (document.fullscreenElement) {
+        try {
+          await document.exitFullscreen();
+        } catch (error) {
+          console.warn("Could not exit fullscreen", error);
+        }
+      }
+    }
+
+    async function requestFullscreenIfAvailable(element) {
+      if (element.requestFullscreen) {
+        try {
+          await element.requestFullscreen();
+        } catch (error) {
+          console.warn("Fullscreen request was blocked or unavailable", error);
+        }
+      }
+    }
+
+    function getImageOrientation(imageUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+
+        img.onload = () => {
+          const width = img.naturalWidth;
+          const height = img.naturalHeight;
+
+          if (!width || !height) {
+            resolve("unknown");
+          } else if (width > height) {
+            resolve("horizontal");
+          } else if (height > width) {
+            resolve("vertical");
+          } else {
+            resolve("square");
+          }
+        };
+
+        img.onerror = () => resolve("unknown");
+        img.src = imageUrl;
+      });
+    }
+
+    function shuffle(items) {
+      return [...items].sort(() => Math.random() - 0.5);
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+  </script>
+</body>
+</html>
