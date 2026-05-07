@@ -124,6 +124,14 @@
       right: 12px;
       display: flex;
       gap: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 200ms ease;
+    }
+
+    .viewer.show-controls .controls {
+      opacity: 1;
+      pointer-events: auto;
     }
 
     .controls button {
@@ -131,6 +139,23 @@
       margin: 0;
       padding: 10px 12px;
       background: rgba(255, 255, 255, 0.85);
+    }
+
+    .hint {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.45);
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 0.85rem;
+      opacity: 0;
+      transition: opacity 200ms ease;
+    }
+
+    .viewer.show-controls .hint {
+      opacity: 1;
     }
   </style>
 </head>
@@ -177,6 +202,7 @@
   <section class="viewer" id="viewer">
     <img id="artImage" alt="Artwork from the Metropolitan Museum of Art" />
     <div class="caption" id="caption"></div>
+    <div class="hint">Tap/click for controls · Right arrow for next · Esc to stop</div>
     <div class="controls">
       <button id="nextButton">Next</button>
       <button id="stopButton">Stop</button>
@@ -198,11 +224,13 @@
     let artworks = [];
     let currentIndex = 0;
     let timerId = null;
+    let controlsTimerId = null;
     let durationMs = 60000;
 
     displayButton.addEventListener("click", startDisplay);
     nextButton.addEventListener("click", showNextArtwork);
     stopButton.addEventListener("click", stopDisplay);
+    viewer.addEventListener("click", showControlsTemporarily);
 
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") stopDisplay();
@@ -239,6 +267,7 @@
 
         await requestFullscreenIfAvailable(viewer);
         showArtwork(currentIndex);
+        showControlsTemporarily();
       } catch (error) {
         console.error(error);
         status.textContent = "Something went wrong while loading artwork. Try another search.";
@@ -334,7 +363,8 @@
 
     async function stopDisplay() {
       clearTimeout(timerId);
-      viewer.classList.remove("active");
+      clearTimeout(controlsTimerId);
+      viewer.classList.remove("active", "show-controls");
       setup.style.display = "block";
       artImage.removeAttribute("src");
 
@@ -345,6 +375,14 @@
           console.warn("Could not exit fullscreen", error);
         }
       }
+    }
+
+    function showControlsTemporarily() {
+      viewer.classList.add("show-controls");
+      clearTimeout(controlsTimerId);
+      controlsTimerId = setTimeout(() => {
+        viewer.classList.remove("show-controls");
+      }, 3000);
     }
 
     async function requestFullscreenIfAvailable(element) {
