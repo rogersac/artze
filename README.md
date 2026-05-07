@@ -1,6 +1,6 @@
 # Met Art Fullscreen Display
 
-This project is a single-page browser app that searches the Metropolitan Museum of Art collection and displays public domain paintings fullscreen as a rotating slideshow.
+This project is a single-page browser app that searches the Metropolitan Museum of Art collection and displays public domain paintings fullscreen as a rotating slideshow. This app can be used directly from the GitHub repository at [https://rogersac.github.io/artze](https://rogersac.github.io/artze).
 
 ## Image source
 
