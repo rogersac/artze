@@ -254,11 +254,15 @@
     const nextButton = document.getElementById("nextButton");
     const stopButton = document.getElementById("stopButton");
 
-    let artworks = [];
-    let currentIndex = 0;
+    let artworkIds = [];
+    let artworkCache = new Map();
+    let currentIndex = -1;
     let timerId = null;
     let controlsTimerId = null;
     let durationMs = 60000;
+    let isAdvancingArtwork = false;
+    let currentOrientationFilter = "any";
+    let displaySessionId = 0;
 
     displayButton.addEventListener("click", startDisplay);
     captionAlwaysVisible.addEventListener("change", applyCaptionDisplaySetting);
@@ -284,24 +288,28 @@
       }
 
       durationMs = Math.max(5, durationSeconds) * 1000;
+      currentOrientationFilter = selectedOrientation;
       displayButton.disabled = true;
       status.textContent = "Searching the Met collection...";
 
       try {
-        artworks = await loadArtworks(query, departmentId, limit, selectedOrientation);
+        artworkIds = await loadArtworkIds(query, departmentId, limit);
+        artworkCache = new Map();
 
-        if (artworks.length === 0) {
-          status.textContent = "No paintings with usable images were found. Try another search.";
+        if (artworkIds.length === 0) {
+          status.textContent = "No matching objects were found. Try another search.";
           return;
         }
 
-        currentIndex = 0;
+        currentIndex = -1;
         setup.style.display = "none";
         viewer.classList.add("active");
         applyCaptionDisplaySetting();
+        caption.innerHTML = "Loading artwork...";
+        displaySessionId += 1;
 
         await requestFullscreenIfAvailable(viewer);
-        showArtwork(currentIndex);
+        await showNextArtwork();
         showControlsTemporarily();
       } catch (error) {
         console.error(error);
@@ -311,7 +319,7 @@
       }
     }
 
-    async function loadArtworks(query, departmentId, limit, selectedOrientation) {
+    async function loadArtworkIds(query, departmentId, limit) {
       const params = new URLSearchParams({
         q: query,
         hasImages: "true",
@@ -327,51 +335,17 @@
       const searchData = await searchResponse.json();
       const ids = (searchData.objectIDs || []).slice(0, Math.max(limit * 3, limit));
 
-      status.textContent = `Found ${ids.length} candidates. Loading images...`;
-
-      const results = [];
-
-      for (const id of ids) {
-        if (results.length >= limit) break;
-
-        try {
-          const response = await fetch(`${MET_API_BASE}/objects/${id}`);
-          const object = await response.json();
-
-          const isPainting = (object.classification || "").toLowerCase().includes("paintings")
-            || (object.objectName || "").toLowerCase().includes("painting");
-
-          if (
-            object.isPublicDomain &&
-            object.primaryImage &&
-            isPainting
-          ) {
-            const imageOrientation = await getImageOrientation(object.primaryImage);
-
-            if (selectedOrientation !== "any" && imageOrientation !== selectedOrientation) {
-              continue;
-            }
-
-            results.push({
-              title: object.title || "Untitled",
-              artist: object.artistDisplayName || "Unknown artist",
-              date: object.objectDate || "",
-              image: object.primaryImage,
-              metUrl: object.objectURL || "",
-              orientation: imageOrientation
-            });
-          }
-        } catch (error) {
-          console.warn(`Could not load object ${id}`, error);
-        }
-      }
-
-      return shuffle(results);
+      status.textContent = `Found ${ids.length} candidates. Starting display...`;
+      return shuffle(ids);
     }
 
-    function showArtwork(index) {
-      const artwork = artworks[index];
-      if (!artwork) return;
+    async function showArtwork(index) {
+      const artworkId = artworkIds[index];
+      if (!artworkId) return false;
+
+      const sessionId = displaySessionId;
+      const artwork = await loadArtworkDetail(artworkId);
+      if (!artwork || sessionId !== displaySessionId || !viewer.classList.contains("active")) return false;
 
       artImage.src = artwork.image;
       artImage.alt = `${artwork.title} by ${artwork.artist}`;
@@ -383,12 +357,30 @@
       `;
 
       resetTimer();
+      return true;
     }
 
-    function showNextArtwork() {
-      if (artworks.length === 0) return;
-      currentIndex = (currentIndex + 1) % artworks.length;
-      showArtwork(currentIndex);
+    async function showNextArtwork() {
+      if (artworkIds.length === 0 || isAdvancingArtwork) return;
+
+      isAdvancingArtwork = true;
+      clearTimeout(timerId);
+
+      try {
+        for (let attempt = 0; attempt < artworkIds.length; attempt += 1) {
+          const nextIndex = (currentIndex + 1 + attempt) % artworkIds.length;
+          const didShowArtwork = await showArtwork(nextIndex);
+
+          if (didShowArtwork) {
+            currentIndex = nextIndex;
+            return;
+          }
+        }
+
+        caption.textContent = "No paintings with usable images were found for this search.";
+      } finally {
+        isAdvancingArtwork = false;
+      }
     }
 
     function resetTimer() {
@@ -399,9 +391,11 @@
     async function stopDisplay() {
       clearTimeout(timerId);
       clearTimeout(controlsTimerId);
+      displaySessionId += 1;
       viewer.classList.remove("active", "show-controls", "caption-always-visible");
       setup.style.display = "block";
       artImage.removeAttribute("src");
+      caption.textContent = "";
 
       if (document.fullscreenElement) {
         try {
@@ -422,6 +416,47 @@
 
     function applyCaptionDisplaySetting() {
       viewer.classList.toggle("caption-always-visible", captionAlwaysVisible.checked);
+    }
+
+    async function loadArtworkDetail(artworkId) {
+      if (artworkCache.has(artworkId)) {
+        return artworkCache.get(artworkId);
+      }
+
+      try {
+        const response = await fetch(`${MET_API_BASE}/objects/${artworkId}`);
+        const object = await response.json();
+        const isPainting = (object.classification || "").toLowerCase().includes("paintings")
+          || (object.objectName || "").toLowerCase().includes("painting");
+
+        if (!object.isPublicDomain || !object.primaryImage || !isPainting) {
+          artworkCache.set(artworkId, null);
+          return null;
+        }
+
+        const imageOrientation = await getImageOrientation(object.primaryImage);
+
+        if (currentOrientationFilter !== "any" && imageOrientation !== currentOrientationFilter) {
+          artworkCache.set(artworkId, null);
+          return null;
+        }
+
+        const artwork = {
+          title: object.title || "Untitled",
+          artist: object.artistDisplayName || "Unknown artist",
+          date: object.objectDate || "",
+          image: object.primaryImage,
+          metUrl: object.objectURL || "",
+          orientation: imageOrientation
+        };
+
+        artworkCache.set(artworkId, artwork);
+        return artwork;
+      } catch (error) {
+        console.warn(`Could not load object ${artworkId}`, error);
+        artworkCache.set(artworkId, null);
+        return null;
+      }
     }
 
     async function requestFullscreenIfAvailable(element) {
